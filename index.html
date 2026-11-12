@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Violin Play-Along</title>
+<meta name="theme-color" content="#7a2e1f">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <button id="backBtn" class="icon-btn hidden" title="Back to songs">‹ Songs</button>
+  <div class="brand" id="brand"><span class="logo">𝄞</span> Violin Play-Along</div>
+  <div class="song-title hidden" id="songTitle" title="Tap to rename"></div>
+  <div class="spacer"></div>
+  <span class="save-state" id="saveState"></span>
+  <button id="keysBtn" class="icon-btn fine-only" title="Keyboard shortcuts (?)">⌨</button>
+  <button id="stageBtn" class="btn hidden" title="Stage mode: big music, page turns, full screen">🎼 Stage</button>
+  <button id="editBtn" class="btn hidden">✎ Edit</button>
+  <button id="shareBtn" class="btn hidden">Share</button>
+</header>
+
+<!-- ============ LIBRARY ============ -->
+<main id="library" class="view">
+  <section class="card" id="addCard">
+    <h2>Add a song</h2>
+    <p class="muted" id="addHint">Pick a video or a recording. It's saved on your PC; the music is worked out only if you tick "Work out the music".</p>
+    <label class="file-pick">
+      <input type="file" id="addFile" accept="video/*,audio/*">
+      <span>Choose video or recording…</span>
+    </label>
+    <div id="addForm" class="hidden">
+      <div class="row"><label>Title <input id="addTitle" type="text" placeholder="Song name"></label></div>
+      <div class="checks">
+        <label><input type="checkbox" id="optVideo" checked> Keep the video (MP4)</label>
+        <label class="always"><input type="checkbox" checked disabled> Extract the MP3</label>
+        <label><input type="checkbox" id="optAnalyse" checked> Work out the music (lyrics, key, chords, melody)</label>
+      </div>
+      <details class="advanced"><summary>More options</summary>
+        <div class="checks">
+          <label><input type="checkbox" id="optSeparate" checked> Separate the vocals from the band (recommended, slower)</label>
+          <label><input type="checkbox" id="optLyrics" checked> Write out the lyrics</label>
+        </div>
+        <div class="row">
+          <label>Lyrics accuracy
+            <select id="optWhisper">
+              <option value="base">Fast</option>
+              <option value="small" selected>Good</option>
+              <option value="medium">Best (slow)</option>
+            </select></label>
+          <label>Language
+            <select id="optLang">
+              <option value="">Detect automatically</option>
+              <option value="en">English</option>
+              <option value="af">Afrikaans</option>
+              <option value="zu">Zulu</option>
+              <option value="xh">Xhosa</option>
+              <option value="st">Sotho</option>
+            </select></label>
+        </div>
+      </details>
+      <button class="btn primary" id="addGo">Save song</button>
+      <div class="progress hidden" id="addProgress"><div></div></div>
+    </div>
+  </section>
+
+  <div class="lib-tools" id="libTools">
+    <input type="search" id="libSearch" placeholder="Find a song…" aria-label="Find a song">
+    <select id="libSort" aria-label="Sort songs">
+      <option value="changed">Recently changed</option>
+      <option value="added">Recently added</option>
+      <option value="name">Name A–Z</option>
+    </select>
+  </div>
+
+  <section class="card" id="pcSongsCard">
+    <h2 id="pcSongsTitle">Songs on your PC</h2>
+    <div id="pcSongs" class="song-list"></div>
+  </section>
+
+  <section class="card" id="localSongsCard">
+    <h2 id="localSongsTitle">Songs on this phone</h2>
+    <div id="localSongs" class="song-list"></div>
+    <label class="file-pick small">
+      <input type="file" id="openSongFile" accept=".vsong,.zip,application/zip,application/octet-stream">
+      <span>Open a song file (.vsong or .zip)…</span>
+    </label>
+  </section>
+
+  <section class="card hidden" id="demoCard">
+    <h2>Demo songs</h2>
+    <p class="muted">Ready-made songs to try things on. Opening one again resets it.</p>
+    <div id="demoBox"></div>
+  </section>
+
+  <section class="card" id="toolsCard">
+    <h2>Phone tools</h2>
+    <div class="tools">
+      <label class="tool">
+        <input type="file" id="toolMp3" accept="video/*">
+        <span class="tool-icon">♫</span><span>Video → MP3</span>
+      </label>
+      <label class="tool">
+        <input type="file" id="toolVoice" accept="audio/*" capture>
+        <span class="tool-icon">🎙</span><span>Record voice</span>
+      </label>
+      <label class="tool">
+        <input type="file" id="toolVideo" accept="video/*" capture="environment">
+        <span class="tool-icon">🎥</span><span>Record video</span>
+      </label>
+    </div>
+    <div id="toolOut"></div>
+  </section>
+
+  <p class="muted center" id="lanHint"></p>
+</main>
+
+<!-- ============ SONG ============ -->
+<main id="songView" class="view hidden">
+  <div class="panels">
+    <details class="panel" id="keyPanel">
+      <summary>Key &amp; chords</summary>
+      <div id="keyInfo"></div>
+    </details>
+    <details class="panel" id="layerPanel">
+      <summary>Parts &amp; display</summary>
+      <div id="layers"></div>
+    </details>
+    <details class="panel" id="setPanel">
+      <summary>Timing &amp; settings</summary>
+      <div id="settings"></div>
+    </details>
+  </div>
+
+  <div class="score-head">
+  <div class="part-tabs" id="partTabs"></div>
+  <div class="sec-chips hidden" id="secChips"></div>
+  <div class="edit-bar hidden" id="editBar">
+   <div class="eb-row">
+    <div class="grp" data-label="Pitch">
+      <button data-act="up" title="Higher (↑)">▲</button>
+      <button data-act="down" title="Lower (↓)">▼</button>
+      <button data-act="octUp" title="Octave higher (Shift+↑)">8va▲</button>
+      <button data-act="octDown" title="Octave lower (Shift+↓)">8va▼</button>
+    </div>
+    <div class="grp durs" data-label="Length">
+      <button data-dur="1" title="16th (1)">𝅘𝅥𝅯</button>
+      <button data-dur="2" title="8th (2)">♪</button>
+      <button data-dur="4" title="Quarter (3)">♩</button>
+      <button data-dur="8" title="Half (4)">𝅗𝅥</button>
+      <button data-dur="16" title="Whole (5)">𝅝</button>
+      <button data-act="dot" title="Dotted (.)">•</button>
+      <button data-act="trip" title="Triplet: three in the time of two (T)">3</button>
+    </div>
+    <div class="grp" data-label="Note">
+      <button data-act="add" title="Put a note on the selected rest (N)">+ Note</button>
+      <button data-act="del" title="Make it a rest (Delete)">Rest</button>
+    </div>
+    <div class="grp" data-label="Phrasing">
+      <button data-act="slur" title="Slur to the next note; tap again to make it longer (S)">⌒ +</button>
+      <button data-act="unslur" title="Remove slur">⌒ ✕</button>
+      <button data-act="cresc" title="Crescendo hairpin; tap again to make it longer">&lt;</button>
+      <button data-act="dim" title="Diminuendo hairpin; tap again to make it longer">&gt;</button>
+      <button data-act="unhp" title="Remove hairpin">&lt;&gt; ✕</button>
+      <button data-act="ferm" title="Fermata (hold)">𝄐</button>
+    </div>
+    <div class="grp" data-label="Bowing">
+      <button data-act="bowDown" title="Down-bow">⊓</button>
+      <button data-act="bowUp" title="Up-bow">V</button>
+      <select data-act="fing" title="Fingering">
+        <option value="">finger…</option><option>0</option><option>1</option><option>2</option><option>3</option><option>4</option>
+        <option value="-">(none)</option>
+      </select>
+    </div>
+    <div class="grp" data-label="Marks">
+      <select data-act="dyn" title="Dynamics">
+        <option value="">dyn…</option><option>pp</option><option>p</option><option>mp</option><option>mf</option>
+        <option>f</option><option>ff</option><option>cresc.</option><option>dim.</option><option value="-">(none)</option>
+      </select>
+      <button data-act="text" title="Add a word like 'FILL 1', 'hold' or 'pizz.'">Text</button>
+    </div>
+    <div class="grp" data-label="Song">
+      <button data-act="section" title="Mark a section (Intro, Verse, Chorus…) at this bar">§ Section</button>
+      <button data-act="bars" title="Add empty bars anywhere">+ Bars</button>
+    </div>
+    <div class="grp" data-label="Undo">
+      <button data-act="undo" title="Undo (Ctrl+Z)">↶</button>
+      <button data-act="redo" title="Redo (Ctrl+Y)">↷</button>
+    </div>
+   </div>
+    <div class="edit-hint" id="editHint"></div>
+  </div>
+  </div>
+
+  <div id="scoreWrap"><div id="score"></div></div>
+  <div class="empty-score hidden" id="emptyScore"></div>
+</main>
+
+<footer class="transport hidden" id="transport">
+  <button id="tStart" class="icon-btn" title="Back to start">⏮</button>
+  <button id="tBack" class="icon-btn" title="Back one bar">⏪</button>
+  <button id="tPlay" class="play" title="Play / pause (Space)">▶</button>
+  <button id="tFwd" class="icon-btn" title="Forward one bar">⏩</button>
+  <div class="t-bar" id="tBar">Bar 1</div>
+  <div class="t-more">
+  <label class="t-speed">Speed <input type="range" id="tSpeed" min="50" max="110" step="5" value="100"><span id="tSpeedVal">100%</span></label>
+  <select id="tTrack" title="What you hear"></select>
+  <button id="tSynth" class="btn toggle" title="Hear the notes of the part on screen">♪ Hear part</button>
+  <button id="tLoop" class="btn toggle" title="Loop some bars">⟲ Loop</button>
+  <button id="tPractice" class="btn" title="Count-in, click, speed trainer, intonation check">🎯 Practice</button>
+  <button id="tFollow" class="btn toggle on" title="Scroll with the music">Follow</button>
+  <span class="zoom"><button id="zOut" class="icon-btn">A−</button><button id="zIn" class="icon-btn">A+</button></span>
+  </div>
+</footer>
+
+<div class="sheet hidden" id="practice">
+  <div class="sheet-head"><b>Practice</b><button class="icon-btn" id="pClose" title="Close">✕</button></div>
+  <div class="sheet-body">
+    <div class="p-row">
+      <label>Count-in <select id="pCount"><option value="0">Off</option><option value="1">1 bar</option><option value="2">2 bars</option></select></label>
+      <label class="chk"><input type="checkbox" id="pClick"> Click on every beat</label>
+    </div>
+    <div class="mini-label">Speed trainer</div>
+    <p class="muted small">Loops the bars you choose, a little faster each time round.</p>
+    <div class="p-row">
+      <label>Start at <select id="pFrom"></select></label>
+      <label>Each time <select id="pStep"><option value="0.02">+2%</option><option value="0.05" selected>+5%</option><option value="0.1">+10%</option></select></label>
+      <label>Up to <select id="pTo"></select></label>
+    </div>
+    <div class="p-row"><span id="pRange" class="muted">Loop: whole song</span></div>
+    <div class="p-row"><button class="btn primary" id="pTrain">Start speed trainer</button></div>
+    <div class="mini-label">Loop a section</div>
+    <div class="chips-row" id="pSecs"></div>
+    <div class="mini-label">Intonation check</div>
+    <p class="muted small">Listens through the microphone while you play your part, and colours each note: green in tune, orange a bit off, red out of tune. Use headphones so the microphone hears only you.</p>
+    <div class="p-row"><button class="btn" id="pMic">🎙 Start listening</button><button class="btn" id="pMicClear">Clear colours</button></div>
+    <div class="tuner hidden" id="tuner">
+      <div class="tuner-note"><span id="tnHeard">–</span><small id="tnWant"></small></div>
+      <div class="tuner-meter"><div class="tuner-mid"></div><div class="tuner-needle" id="tnNeedle"></div></div>
+      <div class="tuner-cents" id="tnCents"></div>
+    </div>
+    <div id="pSummary" class="muted small"></div>
+  </div>
+</div>
+
+<div class="stage-bar hidden" id="stageBar">
+  <button class="icon-btn" id="sgPrev" title="Previous page (←, Page Up)">◀</button>
+  <button class="play" id="sgPlay" title="Play / pause (Space)">▶</button>
+  <button class="icon-btn" id="sgNext" title="Next page (→, Page Down)">▶▶</button>
+  <div class="sg-info"><b id="sgSec"></b><span id="sgBar"></span></div>
+  <div class="spacer"></div>
+  <button class="icon-btn" id="sgOut" title="Smaller">A−</button>
+  <button class="icon-btn" id="sgIn" title="Bigger">A+</button>
+  <button class="btn toggle" id="sgDark" title="Dark theme (D)">☾ Dark</button>
+  <button class="btn" id="sgFull" title="Full screen (F)">⛶</button>
+  <button class="btn" id="sgExit" title="Leave stage mode (Esc)">✕ Exit</button>
+</div>
+
+<div class="modal hidden" id="modal"><div class="modal-box"><div id="modalBody"></div><div class="modal-btns" id="modalBtns"></div></div></div>
+<div class="toast hidden" id="toast"></div>
+
+<script src="demo/demos.js"></script>
+<script src="lib/vexflow-bravura.js"></script>
+<script src="lib/jszip.min.js"></script>
+<script src="lib/lamejs.iife.js"></script>
+<script src="js/theory.js"></script>
+<script src="sounds/sounds.js"></script>
+<script src="js/player.js"></script>
+<script src="js/score.js"></script>
+<script src="js/arrange.js"></script>
+<script src="js/store.js"></script>
+<script src="js/tools.js"></script>
+<script src="lib/mp4-muxer.js"></script>
+<script src="js/video.js"></script>
+<script src="lib/jspdf.umd.min.js"></script>
+<script src="js/exports.js"></script>
+<script src="js/practice.js"></script>
+<script src="js/app.js"></script>
+<script src="js/stage.js"></script>
+</body>
+</html>
