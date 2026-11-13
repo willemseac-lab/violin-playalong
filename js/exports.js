@@ -67,7 +67,9 @@ const Exports = (() => {
   const TYPE = { 48: ['whole', 0], 36: ['half', 1], 24: ['half', 0], 18: ['quarter', 1], 12: ['quarter', 0], 9: ['eighth', 1], 6: ['eighth', 0], 3: ['16th', 0] };
   const TTYPE = { 8: 'quarter', 4: 'eighth', 2: '16th' };
   const KIND = { maj: 'major', min: 'minor', dim: 'diminished', sus2: 'suspended-second', sus4: 'suspended-fourth', 7: 'dominant', maj7: 'major-seventh', m7: 'minor-seventh' };
-  const CLEF = { treble: ['G', 2], alto: ['C', 3], bass: ['F', 4] };
+  const CLEF = { treble: ['G', 2], alto: ['C', 3], bass: ['F', 4], percussion: ['percussion', 0] };
+  const drumXml = d => { const k = (Theory.DRUMS[d] || Theory.DRUMS[38]).key.split('/'); return `<unpitched><display-step>${k[0].toUpperCase()}</display-step><display-octave>${k[1]}</display-octave></unpitched>`; };
+  const drumHead = d => /x2/.test((Theory.DRUMS[d] || {}).key || '') ? '<notehead>x</notehead>' : '';
   function pitchXml(midi, key) {
     const n = Theory.pcName(midi, key);
     const alter = n.length > 1 ? (n[1] === '#' ? 1 : -1) : 0;
@@ -95,7 +97,7 @@ const Exports = (() => {
 <part-list>${parts.map((p, i) => `<score-part id="P${i + 1}"><part-name>${esc(p.name || 'Part')}</part-name><score-instrument id="P${i + 1}-I1"><instrument-name>${esc(Theory.inst(p).name)}</instrument-name></score-instrument></score-part>`).join('')}</part-list>
 `;
     parts.forEach((p, pi) => {
-      const ins = Theory.inst(p), wkey = Theory.writtenKey(song.key, ins), tr = ins.tr || 0;
+      const ins = Theory.inst(p), wkey = ins.drums ? { tonic: 0, mode: 'major' } : Theory.writtenKey(song.key, ins), tr = ins.tr || 0;
       const first = pi === 0;
       xml += `<part id="P${pi + 1}">\n`;
       let tieOpen = false;
@@ -106,7 +108,7 @@ const Exports = (() => {
         if (m === m0) {
           const [sign, line] = CLEF[ins.clef];
           xml += `<attributes><divisions>12</divisions><key><fifths>${Theory.sig(wkey)}</fifths><mode>${song.key.mode}</mode></key>` +
-            `<time><beats>${M.num}</beats><beat-type>${M.den}</beat-type></time><clef><sign>${sign}</sign><line>${line}</line></clef>${transposeXml(tr)}</attributes>`;
+            `<time><beats>${M.num}</beats><beat-type>${M.den}</beat-type></time><clef><sign>${sign}</sign>${line ? `<line>${line}</line>` : ''}</clef>${transposeXml(tr)}</attributes>`;
           if (first && song.tempo) xml += `<direction placement="above"><direction-type>${song.tempoText ? `<words font-weight="bold">${esc(song.tempoText)}</words>` : ''}` +
             `<metronome><beat-unit>${M.compound ? 'quarter' : M.den === 8 ? 'eighth' : 'quarter'}</beat-unit>${M.compound ? '<beat-unit-dot/>' : ''}<per-minute>${Math.round(song.tempo)}</per-minute></metronome></direction-type><sound tempo="${Math.round(song.tempo * (M.compound ? 1.5 : 1))}"/></direction>`;
         }
@@ -161,8 +163,10 @@ const Exports = (() => {
             if (n.text) xml += `<direction placement="above"><direction-type><words font-weight="bold">${esc(n.text)}</words></direction-type></direction>`;
             if (n.hp) { xml += `<direction placement="below"><direction-type><wedge type="${n.hp.type === 'dim' ? 'diminuendo' : 'crescendo'}" number="1"/></direction-type></direction>`; wedgeEnds.set(ev.i + (n.hp.n || 1), true); }
           }
+          const noteStart = xml.length;
           xml += '<note>';
           if (ev.rest) xml += pc.whole ? '<rest measure="yes"/>' : '<rest/>';
+          else if (ins.drums) xml += drumXml(n.p);
           else xml += pitchXml(n.p + tr, wkey);
           xml += `<duration>${pc.d}</duration>`;
           const tieStart = n && (!pc.last || ev.tieOut), tieStop = n && (!pc.first || ev.tieIn);
@@ -193,6 +197,13 @@ const Exports = (() => {
             if (w) xml += `<lyric number="1"><syllabic>${/-$/.test(w.text) ? 'begin' : 'single'}</syllabic><text>${esc(w.text.replace(/-$/, ''))}</text></lyric>`;
           }
           xml += '</note>';
+          if (n && ins.drums) {
+            // the hit's own notehead, and any other drums struck at the same moment as chord notes
+            const one = xml.slice(noteStart).replace(/<lyric[\s\S]*?<\/lyric>/, '').replace(/<notations>[\s\S]*?<\/notations>/, '');
+            const withHead = (x, d) => x.replace(/(<type>[^<]*<\/type>(<dot\/>)?)/, `$1${drumHead(d)}`);
+            xml = xml.slice(0, noteStart) + withHead(xml.slice(noteStart), n.p);
+            for (const d of n.extra || []) xml += withHead(one.replace('<note>', '<note><chord/>').replace(/<unpitched>[\s\S]*?<\/unpitched>/, drumXml(d)), d);
+          }
           if (n && pc.last && !ev.tieOut && wedgeEnds.has(ev.i)) { xml += '<direction><direction-type><wedge type="stop" number="1"/></direction-type></direction>'; wedgeEnds.delete(ev.i); }
         }
         if (m === m1 - 1) xml += '<barline location="right"><bar-style>light-heavy</bar-style></barline>';

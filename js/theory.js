@@ -203,13 +203,23 @@ const Theory = (() => {
     altosax:   { name: 'Alto sax (E\u266d)', group: 'Other', clef: 'treble', tr: 9, lo: 49, hi: 81, center: 63, tone: 'sax' },
     tenorsax:  { name: 'Tenor sax (B\u266d)', group: 'Other', clef: 'treble', tr: 14, lo: 44, hi: 76, center: 58, tone: 'sax' },
     guitar:    { name: 'Guitar (melody)', group: 'Other', clef: 'treble', tr: 12, lo: 40, hi: 76, center: 60, tone: 'pluck' },
+    drums:     { name: 'Drum kit', group: 'Other', clef: 'percussion', tr: 0, lo: 35, hi: 60, center: 38, tone: 'drums', drums: true },
     piano:     { name: 'Piano / keys', group: 'Other', clef: 'treble', tr: 0, lo: 48, hi: 96, center: 72, tone: 'pluck' },
   };
   const CLEF = { // staff steps of top and bottom line, rest positions
     treble: { top: 38, bottom: 30, rest: 'b/4', wrest: 'd/5' },
     alto:   { top: 32, bottom: 24, rest: 'c/4', wrest: 'e/4' },
     bass:   { top: 26, bottom: 18, rest: 'd/3', wrest: 'f/3' },
+    percussion: { top: 38, bottom: 30, rest: 'b/4', wrest: 'd/5' },
   };
+  // Drum kit: General MIDI drum numbers -> where they sit on a percussion staff (and x noteheads for cymbals)
+  const DRUMS = {
+    36: { key: 'f/4', name: 'Kick', step: 31 }, 38: { key: 'c/5', name: 'Snare', step: 35 },
+    42: { key: 'g/5/x2', name: 'Hi-hat', step: 39 }, 46: { key: 'g/5/x2', name: 'Open hi-hat', step: 39 },
+    49: { key: 'a/5/x2', name: 'Crash', step: 40 }, 51: { key: 'f/5/x2', name: 'Ride', step: 38 },
+    45: { key: 'd/5', name: 'Tom', step: 36 }, 41: { key: 'a/4', name: 'Floor tom', step: 33 },
+  };
+  const drumByStep = st => st <= 32 ? 36 : st <= 36 ? 38 : st === 37 ? 45 : st === 38 ? 51 : st === 39 ? 42 : 49;
   const inst = p => INSTRUMENTS[(p && p.instrument) || 'violin'] || INSTRUMENTS.violin;
   const writtenKey = (key, i) => ({ tonic: mod(key.tonic + (i.tr || 0), 12), mode: key.mode });
 
@@ -229,6 +239,6 @@ const Theory = (() => {
     for (let o = -4; o <= 4; o++) { const m = base + 12 * o, d = Math.abs(m - near); if (d < bd) { bd = d; best = m; } }
     return best;
   }
-  return { stepToMidi, letterToMidi, QUAL, isMinor, comfort, fingering, meter, INSTRUMENTS, CLEF, inst, writtenKey, mod, sig, pcName, keyName, vexKey, vexNote, noteName, staffStep, scale, chordName, number, parseChord,
+  return { DRUMS, drumByStep, stepToMidi, letterToMidi, QUAL, isMinor, comfort, fingering, meter, INSTRUMENTS, CLEF, inst, writtenKey, mod, sig, pcName, keyName, vexKey, vexNote, noteName, staffStep, scale, chordName, number, parseChord,
     violinComfort, accidentalText, mainProgression, chordSummary, chordTones, SHARPS, FLATS };
 })();

@@ -68,7 +68,7 @@ const Video = (() => {
       for (const n of p.notes) {
         const t0 = Timeline.beatToT(song, n.b), t1 = Timeline.beatToT(song, n.b + n.d);
         if (t0 < 0 || t0 > total) continue;
-        Synth.voice(off, g, p.instrument, n.p, t0, Math.max(0.08, t1 - t0 - 0.02));
+        Synth.voice(off, g, p.instrument, n.p, t0, Math.max(0.08, t1 - t0 - 0.02), 0.2, n.extra);
       }
     }
     return off.startRendering();

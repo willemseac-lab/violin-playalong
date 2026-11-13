@@ -109,7 +109,8 @@ const Synth = (() => {
   }
   // Play one note: a recorded sample when the instrument's sounds are loaded, else a
   // synthesised tone. Returns the sources so a live player can stop them.
-  function voice(ctx, dest, insKey, midi, when, dur, vol = 0.2) {
+  function voice(ctx, dest, insKey, midi, when, dur, vol = 0.2, extra) {
+    if (insKey === 'drums') return [midi, ...(extra || [])].flatMap(d => drum(ctx, dest, d, when, vol));
     if (Samples.on && Samples.ready(insKey)) return Samples.voice(ctx, dest, insKey, midi, when, dur, vol);
     const tn = (Theory.INSTRUMENTS[insKey] || Theory.INSTRUMENTS.violin).tone || 'strings';
     const t = T[tn];
@@ -138,6 +139,38 @@ const Synth = (() => {
     }
     const stop = end + t.rel * 2 + 0.05;
     nodes.forEach(o => { o.start(start); o.stop(stop); });
+    return nodes;
+  }
+  // Drum kit, made from noise and tones: kick, snare, toms, hi-hat and cymbals.
+  let noiseBuf = null;
+  function noise(ctx) {
+    if (!noiseBuf || noiseBuf.sampleRate !== ctx.sampleRate) {
+      noiseBuf = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
+      const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    }
+    const s = ctx.createBufferSource(); s.buffer = noiseBuf; return s;
+  }
+  function drum(ctx, dest, d, when, vol) {
+    const nodes = [], g = ctx.createGain(); g.connect(dest);
+    const amp = vol * 3;
+    if (d === 36 || d === 41 || d === 45) {           // kick and toms: falling sine
+      const o = ctx.createOscillator(), f0 = d === 36 ? 55 : d === 41 ? 90 : 130;
+      o.frequency.setValueAtTime(f0 * 2.6, when); o.frequency.exponentialRampToValueAtTime(f0, when + 0.08);
+      g.gain.setValueAtTime(amp * 1.4, when); g.gain.exponentialRampToValueAtTime(0.001, when + (d === 36 ? 0.35 : 0.3));
+      o.connect(g); o.start(when); o.stop(when + 0.4); nodes.push(o);
+    } else {
+      const n = noise(ctx), f = ctx.createBiquadFilter();
+      const hat = d === 42 || d === 46, cym = d === 49 || d === 51;
+      f.type = hat || cym ? 'highpass' : 'bandpass'; f.frequency.value = hat ? 7000 : cym ? 5000 : 1800;
+      const len = d === 42 ? 0.06 : d === 46 ? 0.3 : cym ? 1.2 : 0.18;
+      g.gain.setValueAtTime(amp * (hat ? 0.5 : cym ? 0.45 : 1), when); g.gain.exponentialRampToValueAtTime(0.001, when + len);
+      n.connect(f); f.connect(g); n.start(when); n.stop(when + len + 0.05); nodes.push(n);
+      if (d === 38) {                                   // snare body
+        const o = ctx.createOscillator(), og = ctx.createGain(); o.frequency.value = 190;
+        og.gain.setValueAtTime(amp * 0.6, when); og.gain.exponentialRampToValueAtTime(0.001, when + 0.1);
+        o.connect(og); og.connect(dest); o.start(when); o.stop(when + 0.12); nodes.push(o);
+      }
+    }
     return nodes;
   }
   // Metronome click: short woodblock-like tick, accented on the first beat of the bar.
@@ -442,7 +475,7 @@ const Player = (() => {
           const t1 = Timeline.beatToT(this.song, n.b + n.d);
           const when = this.ctx.currentTime + Math.max(0, (t0 - now) / this.rate);
           const dur = Math.max(0.08, (t1 - t0) / this.rate - 0.02);
-          for (const o of Synth.voice(this.ctx, this.master, part.instrument, n.p, when, dur)) {
+          for (const o of Synth.voice(this.ctx, this.master, part.instrument, n.p, when, dur, 0.2, n.extra)) {
             this.scheduled.add(o); o.onended = () => this.scheduled.delete(o);
           }
         }

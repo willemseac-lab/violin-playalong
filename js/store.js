@@ -28,7 +28,7 @@ const Store = (() => {
     async save(song) {
       const r = await fetch(`/api/songs/${song.id}/song.json`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(song) });
-      if (!r.ok) throw new Error('Save failed');
+      if (!r.ok) { let m = 'Save failed'; try { m = (await r.json()).detail || m; } catch (e) { } const er = new Error(m); er.status = r.status; throw er; }
       return r.json();
     },
     async status(id) { return (await fetch(`/api/songs/${id}/status`, { cache: 'no-store' })).json(); },

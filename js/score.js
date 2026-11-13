@@ -118,11 +118,11 @@ const Score = (() => {
       const lyricY = showLyrics ? y + 14 : null; if (showLyrics) y += 22;
       const blocks = [];
       for (const p of parts) {
-        const ins = Theory.inst(p), cl = Theory.CLEF[ins.clef], wkey = Theory.writtenKey(key, ins), tr = ins.tr || 0;
+        const ins = Theory.inst(p), cl = Theory.CLEF[ins.clef], wkey = ins.drums ? { tonic: 0, mode: 'major' } : Theory.writtenKey(key, ins), tr = ins.tr || 0;
         let hi = cl.top, lo = cl.bottom, marks = false;
         for (const n of p.notes) {
           if (n.b + n.d <= b0 || n.b >= b1) continue;
-          const st = Theory.staffStep(n.p + tr, wkey);
+          const st = ins.drums ? (Theory.DRUMS[n.p] || Theory.DRUMS[38]).step : Theory.staffStep(n.p + tr, wkey);
           hi = Math.max(hi, st); lo = Math.min(lo, st);
           if (n.fing != null && opts.showFing !== false || n.bow || n.ferm || n.text) marks = true;
         }
@@ -206,7 +206,13 @@ const Score = (() => {
                 if (ev.rest) sn = new VF.StaveNote({ keys: [bl.cl.rest], clef: bl.ins.clef, duration: code + 'r' });
                 else {
                   const note = p.notes[ev.idx];
-                  sn = new VF.StaveNote({ keys: [Theory.vexNote(note.p + bl.tr, bl.wkey)], clef: bl.ins.clef, duration: code, auto_stem: true });
+                  const keys = bl.ins.drums
+                    ? [...new Set([note.p, ...(note.extra || [])])].map(d => Theory.DRUMS[d] || Theory.DRUMS[38])
+                        .sort((a, b) => a.step - b.step).map(d => d.key)
+                    : [Theory.vexNote(note.p + bl.tr, bl.wkey)];
+                  sn = bl.ins.drums
+                    ? new VF.StaveNote({ keys, clef: 'percussion', duration: code, stem_direction: VF.Stem.UP })
+                    : new VF.StaveNote({ keys, clef: bl.ins.clef, duration: code, auto_stem: true });
                 }
                 if (code.endsWith('d')) VF.Dot.buildAndAttach([sn], { all: true });
                 const mk = { sn, s: startT + pc.pos, d: pc.d, pos: pc.pos, trip: pc.trip };

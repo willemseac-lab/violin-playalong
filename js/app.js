@@ -608,7 +608,7 @@ async function editSection(sec, beat) {
 }
 function instrumentOptions(sel) {
   return ['Strings', 'Woodwind', 'Brass', 'Other'].map(gr => h('optgroup', { label: gr },
-    Object.entries(Theory.INSTRUMENTS).filter(([, v]) => v.group === gr).map(([k, v]) => h('option', { value: k, selected: k === sel }, v.name))));
+    Object.entries(Theory.INSTRUMENTS).filter(([, v]) => v.group === gr && !v.drums).map(([k, v]) => h('option', { value: k, selected: k === sel }, v.name))));
 }
 function changeMyInstrument(k) {
   const me = myPart(), ins = Theory.INSTRUMENTS[k];
@@ -951,6 +951,7 @@ const PART_KINDS = [
   ['copy', 'Copy of a part', 'The melody or your part, set up for another instrument.'],
   ['empty', 'Empty part', 'Start from rests and write your own.'],
   ['import', "Someone else's part", 'From a song file a bandmate or teacher sent you (.vsong or .zip).'],
+  ['track', 'From the recording', 'Write out what one instrument plays: the vocal line, the bass line, the drums or the other instruments.'],
 ];
 
 async function addPartDialog(preset = {}) {
@@ -961,7 +962,7 @@ async function addPartDialog(preset = {}) {
 
   const kindBox = h('div', { class: 'kind-list' });
   const instSel = h('select', {}, ['Strings', 'Woodwind', 'Brass', 'Other'].map(gr => h('optgroup', { label: gr },
-    Object.entries(Theory.INSTRUMENTS).filter(([, v]) => v.group === gr).map(([k, v]) =>
+    Object.entries(Theory.INSTRUMENTS).filter(([, v]) => v.group === gr && !v.drums).map(([k, v]) =>
       h('option', { value: k, selected: k === (preset.inst || 'violin') }, v.name)))));
   const partOpts = sel => s.parts.map(p => h('option', { value: p.id, selected: p.id === sel }, partLabel(p)));
   const srcSel = h('select', {}, partOpts(preset.src || (preset.kind === 'easy' || !preset.kind ? myPart().id : mel.id)));
@@ -971,6 +972,9 @@ async function addPartDialog(preset = {}) {
     h('option', { value: 3 }, '3 · Very easy (long notes)'));
   const posSel = h('select', {}, h('option', { value: 'below' }, 'Below the melody'), h('option', { value: 'above' }, 'Above the melody'));
   const fileInp = h('input', { type: 'file', accept: '.vsong,.zip,application/zip,application/octet-stream' });
+  const canTrack = S.where === 'server' && Store.server.available && s.beats;
+  const trackSel = h('select', {}, [['vocals', 'Vocals → the sung line'], ['bass', 'Bass → bass line (bass clef)'], ['drums', 'Drums → kick, snare and hi-hat'], ['other', 'Other instruments → their top line']]
+    .filter(([k]) => (s.files || {})[k]).map(([k, t]) => h('option', { value: k }, t)));
   const nameInp = h('input', { type: 'text' });
   let nameTouched = false;
   nameInp.addEventListener('input', () => nameTouched = true);
@@ -981,11 +985,12 @@ async function addPartDialog(preset = {}) {
     lvl: h('label', {}, 'How easy', lvlSel),
     pos: h('label', {}, 'Where', posSel),
     file: h('label', {}, 'Song file', fileInp),
+    track: h('label', {}, 'Which track', trackSel),
     name: h('label', {}, 'Name', nameInp),
   };
   const show = {
     counter: ['inst', 'pos', 'name'], duet: ['inst', 'pos', 'name'], easy: ['src', 'lvl', 'inst', 'name'],
-    copy: ['src', 'inst', 'name'], empty: ['inst', 'name'], import: ['file'],
+    copy: ['src', 'inst', 'name'], empty: ['inst', 'name'], import: ['file'], track: ['track', 'name'],
   };
   const autoName = () => {
     if (nameTouched) return;
@@ -996,6 +1001,7 @@ async function addPartDialog(preset = {}) {
       counter: `Countermelody${posSel.value === 'above' ? ' (high)' : ''}${sfx}`, duet: `Duet ${posSel.value === 'above' ? 'above' : 'below'}${sfx}`,
       easy: `${src ? partLabel(src) : 'Part'}, easy ${lvlSel.value}${sfx}`,
       copy: `${src ? partLabel(src) : 'Part'} (${ins})`, empty: `${ins} part`, import: '',
+      track: { vocals: 'Vocal line', bass: 'Bass line', drums: 'Drums', other: 'Other instruments (top line)' }[trackSel.value] || '',
     }[kind];
   };
   const refresh = () => {
@@ -1004,11 +1010,12 @@ async function addPartDialog(preset = {}) {
     autoName();
   };
   for (const [k, title, desc] of PART_KINDS) {
-    const disabled = (k === 'counter' || k === 'duet') && !hasChords;
+    const noTrack = k === 'track' && (!canTrack || !trackSel.options.length);
+    const disabled = ((k === 'counter' || k === 'duet') && !hasChords) || noTrack;
     kindBox.append(h('button', { class: 'kind', 'data-k': k, disabled, onclick: () => { kind = k; nameTouched = false; refresh(); } },
-      h('b', {}, title), h('span', {}, disabled ? 'Needs the chords worked out first.' : desc)));
+      h('b', {}, title), h('span', {}, noTrack ? (S.where !== 'server' ? 'Done by the PC program: open this song there.' : 'Needs the vocals separated first ("Work out music").') : disabled ? 'Needs the chords worked out first.' : desc)));
   }
-  [instSel, srcSel, lvlSel, posSel].forEach(e => e.addEventListener('change', autoName));
+  [instSel, srcSel, lvlSel, posSel, trackSel].forEach(e => e.addEventListener('change', autoName));
   srcSel.addEventListener('change', () => {
     if (kind === 'easy') { const sp = s.parts.find(p => p.id === srcSel.value); if (sp) instSel.value = sp.instrument || 'violin'; autoName(); }
   });
@@ -1023,6 +1030,7 @@ async function addPartDialog(preset = {}) {
     if (!f) return toast('Choose the song file first');
     return importParts(f);
   }
+  if (kind === 'track') return partFromTrack(trackSel.value, nameInp.value.trim());
   const instKey = instSel.value, ins = Theory.INSTRUMENTS[instKey];
   const src = s.parts.find(p => p.id === srcSel.value) || mel;
   const above = posSel.value === 'above';
@@ -1037,6 +1045,27 @@ async function addPartDialog(preset = {}) {
   edit(() => { s.parts.push(part); S.view.partView = part.id; S.sel = null; });
   saveView();
   toast(`Added "${part.name}". Tap Edit to change it, or ✕ on its tab to remove it.`, 6000, { label: 'Undo', fn: undo });
+}
+
+// Ask the PC to write out one separated track as notes, and add it as a new part.
+async function partFromTrack(track, name) {
+  const what = { vocals: 'vocals', bass: 'bass', drums: 'drums', other: 'other instruments' }[track];
+  toast(`Listening to the ${what}… (up to a minute or two)`, 120000);
+  let r;
+  try {
+    const fd = new FormData(); fd.append('track', track);
+    const res = await fetch(`/api/songs/${S.song.id}/transcribe`, { method: 'POST', body: fd });
+    if (!res.ok) throw new Error((await res.json()).detail || 'failed');
+    r = await res.json();
+  } catch (e) { return toast('Could not write out that track: ' + e.message, 6000); }
+  if (!r.notes.length) return toast(`No clear notes found in the ${what}.`, 5000);
+  const ins = r.instrument === 'violin' ? (track === 'other' ? 'piano' : myPart().instrument) : r.instrument;
+  const notes = r.instrument === 'drums' ? r.notes : Arrange.fitRange(r.notes, Theory.INSTRUMENTS[ins], 30);
+  const part = { id: newPartId(), name: name || { vocals: 'Vocal line', bass: 'Bass line', drums: 'Drums', other: 'Other instruments' }[track], instrument: ins, editable: true, visible: true, made: 'track',
+    notes: notes.map(n => ({ b: n.b, d: n.d, p: n.p, ...(n.extra ? { extra: n.extra } : {}) })) };
+  edit(() => { S.song.parts.push(part); S.view.partView = part.id; S.sel = null; });
+  saveView();
+  toast(`Added "${part.name}" (${part.notes.length} notes). It's a first draft: fix anything that's off.`, 6000, { label: 'Undo', fn: undo });
 }
 
 async function importParts(file) {
@@ -1098,7 +1127,13 @@ function scheduleSave() {
       const r = await st.save(S.song);
       if (r && r.modified) S.song.modified = r.modified;
       $('#saveState').textContent = 'Saved ✓';
-    } catch (e) { $('#saveState').textContent = '⚠ Not saved'; toast('Could not save: ' + e.message, 5000); }
+    } catch (e) {
+      $('#saveState').textContent = '⚠ Not saved';
+      if (e.status === 409) {
+        const r = await modal(h('div', {}, h('h3', {}, 'Not saved'), h('p', {}, e.message)), [['Keep looking', null], ['Reopen the song', 'reopen', 'primary']]);
+        if (r === 'reopen') openSong(S.song.id, S.where);
+      } else toast('Could not save: ' + e.message, 5000);
+    }
   }, 600);
 }
 
@@ -1253,6 +1288,11 @@ function setLen(beats) {
 
 let previewCtx = null;
 function previewNote(midi) {
+  const part = S.song && (S.sel ? S.song.parts.find(p => p.id === S.sel.partId) : null);
+  if (part && part.instrument === 'drums') {
+    try { previewCtx = previewCtx || new (window.AudioContext || window.webkitAudioContext)(); Synth.voice(previewCtx, previewCtx.destination, 'drums', midi, previewCtx.currentTime + 0.01, 0.2); } catch (e) { }
+    return;
+  }
   try {
     previewCtx = previewCtx || new (window.AudioContext || window.webkitAudioContext)();
     const c = previewCtx, t = c.currentTime;
@@ -1417,9 +1457,15 @@ function placeNote(sysIdx, blockIdx, m, x, y) {
   beat = Math.max(b0, Math.min(b0 + bpb - g, b0 + Math.floor((beat - b0) / g + 0.35) * g));
   const step = bl.cl.top + Math.round((bl.topLine - y) / 5);
   const ins = Theory.inst(part);
-  let midi = Theory.stepToMidi(step, bl.wkey) - (ins.tr || 0);
-  if (midi < ins.lo - 12 || midi > ins.hi + 12) return false;   // tapped far off the staff
-  midi = Math.max(ins.lo, Math.min(ins.hi, midi));
+  let midi;
+  if (ins.drums) {
+    if (step < 26 || step > 44) return false;
+    midi = Theory.drumByStep(step);
+  } else {
+    midi = Theory.stepToMidi(step, bl.wkey) - (ins.tr || 0);
+    if (midi < ins.lo - 12 || midi > ins.hi + 12) return false;   // tapped far off the staff
+    midi = Math.max(ins.lo, Math.min(ins.hi, midi));
+  }
   putNote(part, +beat.toFixed(4), len, midi);
   return true;
 }
