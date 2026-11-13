@@ -27,8 +27,13 @@ try { Object.assign(S.view, JSON.parse(localStorage.getItem('vpa-view') || '{}')
 const saveView = () => { try { localStorage.setItem('vpa-view', JSON.stringify(S.view)); } catch (e) { } };
 
 // ---------------------------------------------------------------- helpers
-function toast(msg, ms = 2600) {
+// A short message at the bottom; `action` adds a button to it, e.g. { label: 'Undo', fn: undo }.
+function toast(msg, ms = 2600, action) {
   const t = $('#toast'); t.textContent = msg; t.classList.remove('hidden');
+  if (action) {
+    t.append(h('button', { class: 'toast-act', onclick: () => { t.classList.add('hidden'); action.fn(); } }, action.label));
+    ms = Math.max(ms, 6000);
+  }
   clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.add('hidden'), ms);
 }
 function modal(body, buttons) {
@@ -141,7 +146,7 @@ function showLibrary() {
   $('#library').classList.remove('hidden');
   $('#songView').classList.add('hidden');
   $('#transport').classList.add('hidden');
-  ['#backBtn', '#songTitle', '#editBtn', '#shareBtn', '#stageBtn'].forEach(s => $(s).classList.add('hidden'));
+  ['#backBtn', '#songTitle', '#editBtn', '#shareBtn', '#stageBtn', '#undoBtn', '#redoBtn'].forEach(s => $(s).classList.add('hidden'));
   $('#brand').classList.remove('hidden');
   $('#saveState').textContent = '';
   renderLibrary();
@@ -336,11 +341,12 @@ async function openSong(id, where) {
     S.where = where; S.song = normalise(song); S.urls = urls;
   } catch (e) { return toast('Could not open: ' + e.message); }
   S.undo = []; S.redo = []; S.sel = null; S.loopPick = null;
+  undoState();
   S.player.load(S.song, S.urls);
   $('#library').classList.add('hidden');
   $('#songView').classList.remove('hidden');
   $('#transport').classList.remove('hidden');
-  ['#backBtn', '#songTitle', '#editBtn', '#shareBtn', '#stageBtn'].forEach(s => $(s).classList.remove('hidden'));
+  ['#backBtn', '#songTitle', '#editBtn', '#shareBtn', '#stageBtn', '#undoBtn', '#redoBtn'].forEach(s => $(s).classList.remove('hidden'));
   $('#brand').classList.add('hidden');
   $('#songTitle').textContent = S.song.title;
   $('#saveState').textContent = '';
@@ -399,7 +405,10 @@ function renderTabs() {
       S.view.partView = id; saveView(); S.sel = null;
       if (S.player.synthOn) S.player.setSynth(true, null, synthPartId());
       renderTabs(); renderScore(); updateEditHint(); Practice.partChanged && Practice.partChanged();
-    } }, label, mine ? h('span', { class: 'tab-tag' }, '✎') : null));
+    } }, label, mine ? h('span', { class: 'tab-tag' }, '✎') : null,
+      id !== 'all' && !fixedPart(S.song.parts.find(p => p.id === id))
+        ? h('span', { class: 'tab-x', title: 'Delete this part', role: 'button',
+            onclick: e => { e.stopPropagation(); deletePart(S.song.parts.find(p => p.id === id)); } }, '✕') : null));
   }
   box.append(h('button', { class: 'tab add', onclick: () => addPartDialog() }, '+ Add part'));
   updateEditHint();
@@ -785,7 +794,7 @@ function insertBars(m, nBars, o) {
   });
   S.player.loop = null; $('#tLoop').classList.remove('on'); $('#tLoop').textContent = '⟲ Loop';
   S.player.seekBeat(Math.max(0, nb0 - bpb));
-  toast(`Added ${nBars} bar${nBars > 1 ? 's' : ''}. Press play to hear how it fits.`, 3500);
+  toast(`Added ${nBars} bar${nBars > 1 ? 's' : ''}. Press play to hear how it fits.`, 6000, { label: 'Undo', fn: undo });
 }
 
 function removeInsert(g) {
@@ -923,14 +932,16 @@ const newPartId = () => 'p' + Math.random().toString(36).slice(2, 8);
 function renamePart(p) {
   ask('Rename part', '', p.name).then(t => { if (t && t.trim()) edit(() => { p.name = t.trim(); }); });
 }
-async function deletePart(p) {
-  if (!await confirmBox('Delete part?', `"${p.name}" will be removed from this song. You can undo this.`, 'Delete')) return;
+function deletePart(p) {
   edit(() => {
     S.song.parts.splice(S.song.parts.indexOf(p), 1);
     if (S.view.partView === p.id) S.view.partView = myPart().id;
     S.sel = null;
   });
+  saveView();
+  toast(`Deleted "${partLabel(p)}"`, 6000, { label: 'Undo', fn: undo });
 }
+const fixedPart = p => p.id === 'melody' || p === myPart();
 
 const PART_KINDS = [
   ['counter', 'Countermelody', 'A second tune that moves when the singer holds a note or breathes, and stays still when the singer is busy.'],
@@ -1024,7 +1035,7 @@ async function addPartDialog(preset = {}) {
     notes: notes.map(n => ({ b: n.b, d: n.d, p: n.p })), made: kind };
   edit(() => { s.parts.push(part); S.view.partView = part.id; S.sel = null; });
   saveView();
-  toast(`Added "${part.name}". It's a starting point: tap Edit to change it.`, 4000);
+  toast(`Added "${part.name}". Tap Edit to change it, or ✕ on its tab to remove it.`, 6000, { label: 'Undo', fn: undo });
 }
 
 async function importParts(file) {
@@ -1064,13 +1075,18 @@ function edit(fn, opts = {}) {
   S.undo.push(snapshot()); if (S.undo.length > 100) S.undo.shift();
   S.redo = [];
   fn();
+  undoState();
   S.song.parts.forEach(pp => pp.notes.sort((a, b) => a.b - b.b));
   scheduleSave();
   if (opts.light) renderScore(); else renderAll();
 }
 function resync() { const b = S.player.beat; S.player.pause(); S.player.seekBeat(Math.max(0, b)); }
-function undo() { if (!S.undo.length) return toast('Nothing to undo'); S.redo.push(snapshot()); restore(S.undo.pop()); S.sel = null; scheduleSave(); resync(); renderAll(); }
-function redo() { if (!S.redo.length) return; S.undo.push(snapshot()); restore(S.redo.pop()); S.sel = null; scheduleSave(); resync(); renderAll(); }
+function undoState() {
+  const u = $('#undoBtn'), r = $('#redoBtn'); if (!u) return;
+  u.disabled = !S.undo.length; r.disabled = !S.redo.length;
+}
+function undo() { if (!S.undo.length) return toast('Nothing to undo'); S.redo.push(snapshot()); restore(S.undo.pop()); S.sel = null; scheduleSave(); resync(); renderAll(); undoState(); toast('Undone', 1500); }
+function redo() { if (!S.redo.length) return; S.undo.push(snapshot()); restore(S.redo.pop()); S.sel = null; scheduleSave(); resync(); renderAll(); undoState(); toast('Redone', 1500); }
 
 function scheduleSave() {
   $('#saveState').textContent = 'Saving…';
@@ -1315,10 +1331,10 @@ function bindDrag() {
 
 function shortcutsHelp() {
   const rows = [
-    ['Playing', [['Space', 'Play / pause'], ['← →', 'Back / forward one bar'], ['L', 'Loop some bars'], ['E', 'Start editing'], ['?', 'This list']]],
+    ['Playing', [['Space', 'Play / pause'], ['← →', 'Back / forward one bar'], ['L', 'Loop some bars'], ['Ctrl + Z / Ctrl + Y', 'Undo / redo any change'], ['E', 'Start editing'], ['?', 'This list']]],
     ['Editing', [['Click a note', 'Select it'], ['Drag a note', 'Move it up or down in the key'], ['↑ ↓', 'Up / down a semitone'], ['Shift + ↑ ↓', 'Up / down an octave'],
       ['← →', 'Previous / next note'], ['1 2 3 4 5', '16th, 8th, quarter, half, whole'], ['.', 'Dotted'], ['T', 'Triplet'], ['N', 'Put a note on the selected rest'],
-      ['Delete', 'Make it a rest'], ['S', 'Slur to the next note'], ['Ctrl + Z / Ctrl + Y', 'Undo / redo'], ['Esc', 'Deselect, then stop editing']]],
+      ['Delete', 'Make it a rest'], ['S', 'Slur to the next note'], ['Esc', 'Deselect, then stop editing']]],
     ['Stage mode', [['Space', 'Play / pause'], ['→  Page Down', 'Next page (most page-turn pedals send these)'], ['←  Page Up', 'Previous page'], ['D', 'Dark theme'], ['F', 'Full screen'], ['Esc', 'Leave stage mode']]],
   ];
   modal(h('div', { class: 'keys-help' }, h('h3', {}, 'Keyboard shortcuts'),
@@ -1474,6 +1490,8 @@ function bindSong() {
   });
   $('#tPractice').addEventListener('click', () => Practice.open());
   $('#keysBtn').addEventListener('click', shortcutsHelp);
+  $('#undoBtn').addEventListener('click', undo);
+  $('#redoBtn').addEventListener('click', redo);
   bindDrag();
   Samples.on = S.view.realSounds !== false;
   S.player.onRate = r => { $('#tSpeed').value = Math.round(r * 100); $('#tSpeedVal').textContent = Math.round(r * 100) + '%'; toast(`Speed ${Math.round(r * 100)}%`, 1200); };
@@ -1491,6 +1509,8 @@ function bindSong() {
     const k = e.key;
     if (k === '?' ) { e.preventDefault(); return shortcutsHelp(); }
     if (!S.song || ((typeof Stage !== 'undefined' && Stage.on))) return;
+    if ((e.ctrlKey || e.metaKey) && k.toLowerCase() === 'z') { e.preventDefault(); return e.shiftKey ? redo() : undo(); }
+    if ((e.ctrlKey || e.metaKey) && k.toLowerCase() === 'y') { e.preventDefault(); return redo(); }
     if (!S.editing && k.toLowerCase() === 'e' && !e.ctrlKey && !e.metaKey) return setEditing(true);
     if (k === 'Escape' && S.editing && !S.sel) return setEditing(false);
     if (!S.editing && k.toLowerCase() === 'l') return $('#tLoop').click();

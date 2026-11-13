@@ -1,5 +1,5 @@
 // Offline support when the app is hosted on https (phone install).
-const CACHE = 'vpa-v6';
+const CACHE = 'vpa-v7';
 const SOUNDS = ["sounds/bassoon.mp3", "sounds/cello.mp3", "sounds/clarinet.mp3", "sounds/contrabass.mp3", "sounds/flute.mp3", "sounds/guitar.mp3", "sounds/harp.mp3", "sounds/horn.mp3", "sounds/piano.mp3", "sounds/sax.mp3", "sounds/trombone.mp3", "sounds/trumpet.mp3", "sounds/tuba.mp3", "sounds/violin.mp3"];
 const SHELL = ['./', 'index.html', 'style.css', 'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png',
   'lib/vexflow-bravura.js', 'lib/jszip.min.js', 'lib/lamejs.iife.js', 'lib/mp4-muxer.js', 'js/video.js', 'demo/demos.js',

@@ -263,3 +263,11 @@ html:has(body.stage) { overscroll-behavior: none; }
   .stage-bar .sg-info { order: -1; width: 100%; text-align: center; }
   .stage-bar .spacer { display: none; }
 }
+
+/* undo in messages, delete on part tabs */
+.toast { display: flex; align-items: center; gap: 12px; }
+.toast-act { background: none; border: 1px solid rgba(255,255,255,.5); color: #ffd27a; font-weight: 700; border-radius: 8px; padding: 4px 12px; cursor: pointer; }
+.tab-x { margin-left: 8px; padding: 0 4px; border-radius: 6px; font-size: 12px; opacity: .55; }
+.tab-x:hover { opacity: 1; background: rgba(0,0,0,.12); }
+.tab.on .tab-x:hover { background: rgba(255,255,255,.2); }
+.topbar .icon-btn:disabled { opacity: .35; cursor: default; }
