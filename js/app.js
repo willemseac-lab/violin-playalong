@@ -424,7 +424,8 @@ function updateEditHint() {
   const id = shownPartId();
   hint.innerHTML = '';
   const shown = S.song.parts.find(x => x.id === id);
-  if (id === 'all' || (shown && shown.editable)) hint.append('Tap a note to select it. Tap words or chords to fix them.');
+  if (id === 'all' || (shown && shown.editable)) hint.append('Tap on the staff to put a note there (choose the length first). Tap a note to select it; drag it up or down. ' +
+    (window.matchMedia('(pointer: fine)').matches ? 'Or type A–G. ' : '') + 'Tap words or chords to fix them.');
   else hint.append('This sheet is for reference and can\'t be edited. ',
     h('button', { class: 'btn small', onclick: () => { S.view.partView = myPart().id; saveView(); renderTabs(); renderScore(); } }, 'Edit my part'));
 }
@@ -1204,6 +1205,7 @@ function act(a) {
     }
     case 'unhp': if (!needNote()) return; return edit(() => { delete n.hp; selectNote(n); }, { light: true });
     case 'ferm': if (!needNote()) return; return edit(() => { if (n.ferm) delete n.ferm; else n.ferm = true; selectNote(n); }, { light: true });
+    case 'suggest': return suggestDialog();
     case 'section': {
       const beat = n ? n.b : (S.sel && S.sel.rest ? S.sel.rest.s : S.player.beat);
       const bpb = S.song.beatsPerBar, bar = Math.floor(beat / bpb + 1e-9) * bpb;
@@ -1332,7 +1334,7 @@ function bindDrag() {
 function shortcutsHelp() {
   const rows = [
     ['Playing', [['Space', 'Play / pause'], ['← →', 'Back / forward one bar'], ['L', 'Loop some bars'], ['Ctrl + Z / Ctrl + Y', 'Undo / redo any change'], ['E', 'Start editing'], ['?', 'This list']]],
-    ['Editing', [['Click a note', 'Select it'], ['Drag a note', 'Move it up or down in the key'], ['↑ ↓', 'Up / down a semitone'], ['Shift + ↑ ↓', 'Up / down an octave'],
+    ['Editing', [['Click on the staff', 'Put a note there'], ['A – G', 'Type notes one after another'], ['Click a note', 'Select it'], ['Drag a note', 'Move it up or down in the key'], ['↑ ↓', 'Up / down a semitone'], ['Shift + ↑ ↓', 'Up / down an octave'],
       ['← →', 'Previous / next note'], ['1 2 3 4 5', '16th, 8th, quarter, half, whole'], ['.', 'Dotted'], ['T', 'Triplet'], ['N', 'Put a note on the selected rest'],
       ['Delete', 'Make it a rest'], ['S', 'Slur to the next note'], ['Esc', 'Deselect, then stop editing']]],
     ['Stage mode', [['Space', 'Play / pause'], ['→  Page Down', 'Next page (most page-turn pedals send these)'], ['←  Page Up', 'Previous page'], ['D', 'Dark theme'], ['F', 'Full screen'], ['Esc', 'Leave stage mode']]],
@@ -1381,11 +1383,16 @@ async function onScoreClick(e) {
   if (S.editing) {
     const hit = r.hit;
     const p = hit && S.song.parts.find(x => x.id === hit.partId);
-    if (hit && p && p.editable) {
-      if (hit.idx != null) { S.sel = { partId: p.id, idx: hit.idx }; previewNote(p.notes[hit.idx].p); }
-      else S.sel = { partId: p.id, rest: hit.rest };
+    // close to a note head: select it; anywhere else on your staff: put a note there
+    const onNote = hit && hit.idx != null && Math.abs(x - (hit.sn.getAbsoluteX() + 6)) < 14;
+    if (onNote && p && p.editable) {
+      S.sel = { partId: p.id, idx: hit.idx }; previewNote(p.notes[hit.idx].p);
       renderScore();
-    } else if (hit) toast('That\'s a reference part and can\'t be edited.');
+    } else if (r.block >= 0 && r.measure != null && placeNote(sysIdx, r.block, r.measure, x, y)) {
+      /* placed */
+    } else if (hit && p && p.editable && hit.rest) {
+      S.sel = { partId: p.id, rest: hit.rest }; renderScore();
+    } else if (hit && p && !p.editable) toast('That\'s a reference part and can\'t be edited.');
     else if (lyr || chd) { /* ignore */ }
     return;
   }
@@ -1393,6 +1400,112 @@ async function onScoreClick(e) {
   if (r.hit) S.player.seekBeat(r.hit.s);
   else if (r.measure != null) S.player.seekBeat(r.measure * bpb);
   updateCursor(true);
+}
+
+// ---- note entry
+// Put a note where the staff was tapped: pitch from the height (in the key), beat from
+// the position (snapped to the chosen note length). Replaces whatever was there.
+function placeNote(sysIdx, blockIdx, m, x, y) {
+  const sys = S.layout.systems[sysIdx], bl = sys.blocks[blockIdx];
+  const part = bl && bl.part;
+  if (!part || !part.editable) return false;
+  const meas = S.layout.measures[m], bpb = S.song.beatsPerBar, M = Theory.meter(S.song);
+  const [[b0, x0], [, x1]] = meas.points;
+  let beat = b0 + Math.max(0, Math.min(0.999, (x - x0) / (x1 - x0))) * bpb;
+  const len = S.curDur / 4 / M.q;                       // chosen length, in beats
+  const g = Math.min(len, M.compound ? 1 / 3 : 1, 1);     // snap grid
+  beat = Math.max(b0, Math.min(b0 + bpb - g, b0 + Math.floor((beat - b0) / g + 0.35) * g));
+  const step = bl.cl.top + Math.round((bl.topLine - y) / 5);
+  const ins = Theory.inst(part);
+  let midi = Theory.stepToMidi(step, bl.wkey) - (ins.tr || 0);
+  if (midi < ins.lo - 12 || midi > ins.hi + 12) return false;   // tapped far off the staff
+  midi = Math.max(ins.lo, Math.min(ins.hi, midi));
+  putNote(part, +beat.toFixed(4), len, midi);
+  return true;
+}
+function putNote(part, b, len, midi) {
+  const e = b + len;
+  let nn;
+  edit(() => {
+    const keep = [];
+    for (const n of part.notes) {
+      const ne = n.b + n.d;
+      if (ne <= b + 1e-6 || n.b >= e - 1e-6) { keep.push(n); continue; }
+      if (n.b < b) { keep.push(Object.assign(n, { d: +(b - n.b).toFixed(4) })); if (ne > e) keep.push({ ...n, b: +e.toFixed(4), d: +(ne - e).toFixed(4), slur: undefined }); continue; }
+      if (ne > e) { n.d = +(ne - e).toFixed(4); n.b = +e.toFixed(4); keep.push(n); }
+    }
+    nn = { b, d: +len.toFixed(4), p: midi };
+    keep.push(nn);
+    part.notes = keep.filter(n => n.d > 1e-4).sort((a1, b1) => a1.b - b1.b);
+    selectNote(nn);
+  }, { light: true });
+  previewNote(midi);
+  return nn;
+}
+// PC: type A-G to add notes one after another (or change the selected note's letter).
+function typeLetter(letter) {
+  const part = curPart(), key = Theory.writtenKey(S.song.key, Theory.inst(part)), tr = Theory.inst(part).tr || 0;
+  const n = selNote();
+  if (n) {
+    const p = Theory.letterToMidi(letter, key, n.p + tr) - tr;
+    edit(() => { n.p = p; selectNote(n); }, { light: true });
+    previewNote(p);
+    return;
+  }
+  const at = S.sel && S.sel.rest ? S.sel.rest.s : Math.max(0, Math.floor(S.player.beat));
+  const prev = [...part.notes].reverse().find(x => x.b < at);
+  const near = prev ? prev.p + tr : Theory.inst(part).center + tr;
+  const len = S.curDur / 4 / Theory.meter(S.song).q;
+  putNote(part, +at.toFixed(4), len, Theory.letterToMidi(letter, key, near) - tr);
+  // move on: select the space straight after the new note
+  S.sel = { partId: part.id, rest: { s: +(at + len).toFixed(4), e: +(at + 2 * len).toFixed(4) } };
+  renderScore();
+}
+
+// Write a line for some bars from the chords (for empty bars, or to try an idea).
+async function suggestDialog() {
+  const s = S.song, bpb = s.beatsPerBar, full = Score.songRange(s), part = curPart();
+  const n = selNote();
+  const start = n ? Math.floor(n.b / bpb) : S.sel && S.sel.rest ? Math.floor(S.sel.rest.s / bpb) : Math.max(full.m0, Math.floor(S.player.beat / bpb));
+  const num = (v) => h('input', { type: 'number', min: 1, max: full.m1 - full.m0, value: v, inputmode: 'numeric' });
+  const a = num(start - full.m0 + 1), b = num(Math.min(full.m1 - full.m0, start - full.m0 + 4));
+  const style = h('select', {},
+    h('option', { value: 'line' }, 'A moving line (like a countermelody)'),
+    h('option', { value: 'long' }, 'Long notes (one or two per bar, good for pads)'),
+    h('option', { value: 'arp' }, 'Broken chords (eighth notes)'));
+  if (!await modal(h('div', { class: 'add-part' }, h('h3', {}, '✨ Suggest notes'),
+    h('p', { class: 'muted' }, `Writes notes for "${partLabel(part)}" from the chords. It replaces any notes already in those bars. You can undo it.`),
+    h('div', { class: 'row' }, h('label', {}, 'From bar', a), h('label', {}, 'To bar', b)), h('div', { class: 'row' }, h('label', {}, 'Style', style))),
+    [['Cancel', false], ['Write notes', true, 'primary']])) return;
+  const m0 = full.m0 + Math.max(1, +a.value || 1) - 1, m1 = full.m0 + Math.max(+a.value || 1, +b.value || 1);
+  const b0 = m0 * bpb, b1 = m1 * bpb;
+  const chords = [...s.chords].sort((x, y) => x.beat - y.beat).filter(c => c.beat < b1 && c.beat + c.dur > b0)
+    .map(c => ({ ...c, beat: Math.max(c.beat, b0), dur: Math.min(c.beat + c.dur, b1) - Math.max(c.beat, b0) }));
+  if (!chords.length) return toast('There are no chords in those bars to work from. Add chords first (Edit, tap above the staff).', 5000);
+  const ins = Theory.inst(part);
+  const near = part.notes.filter(x => x.b < b0).slice(-6).map(x => x.p);
+  const center = near.length ? near.sort((x, y) => x - y)[Math.floor(near.length / 2)] : ins.center;
+  let notes = [];
+  if (style.value === 'line') notes = Arrange.fill(s, ins, b0, b1, chords, center);
+  else {
+    for (const c of chords) {
+      const tones = Theory.chordTones(c);
+      const pick = target => { let best = null, bd = 1e9; for (let m = ins.lo; m <= ins.hi; m++) if (tones.includes(Theory.mod(m, 12)) && Math.abs(m - target) < bd) { bd = Math.abs(m - target); best = m; } return best; };
+      if (style.value === 'long') {
+        const p0 = pick(notes.length ? notes[notes.length - 1].p : center);
+        notes.push({ b: c.beat, d: c.dur, p: p0 });
+      } else {
+        const root = pick(center - 4), ch = [root, ...[1, 2].map(i => pick(root + [4, 7][i - 1] + (i === 2 ? 0 : 0)))].filter(x => x != null).sort((x, y) => x - y);
+        const seq = [ch[0], ch[1], ch[2], ch[1]];
+        for (let t = 0, k = 0; t < c.dur - 1e-6; t += 0.5, k++) notes.push({ b: c.beat + t, d: Math.min(0.5, c.dur - t), p: seq[k % 4] });
+      }
+    }
+  }
+  edit(() => {
+    part.notes = part.notes.filter(x => x.b + x.d <= b0 + 1e-6 || x.b >= b1 - 1e-6).concat(notes.map(x => ({ b: +x.b.toFixed(4), d: +x.d.toFixed(4), p: x.p })));
+    S.sel = null;
+  });
+  toast(`Wrote ${notes.length} notes in bars ${+a.value}–${+b.value}`, 6000, { label: 'Undo', fn: undo });
 }
 
 async function editLyric(i) {
@@ -1534,6 +1647,7 @@ function bindSong() {
     if (k === '.') return act('dot');
     if (k.toLowerCase() === 't') return act('trip');
     if (k === 'Delete' || k === 'Backspace') { e.preventDefault(); return act('del'); }
+    if (/^[a-gA-G]$/.test(k) && !e.ctrlKey && !e.metaKey && !e.altKey) return typeLetter(k);
     if (k.toLowerCase() === 'n') return act('add');
     if (k.toLowerCase() === 's') return act('slur');
     if (k === 'Escape') { S.sel = null; renderScore(); }

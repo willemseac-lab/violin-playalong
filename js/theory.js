@@ -213,6 +213,22 @@ const Theory = (() => {
   const inst = p => INSTRUMENTS[(p && p.instrument) || 'violin'] || INSTRUMENTS.violin;
   const writtenKey = (key, i) => ({ tonic: mod(key.tonic + (i.tr || 0), 12), mode: key.mode });
 
-  return { QUAL, isMinor, comfort, fingering, meter, INSTRUMENTS, CLEF, inst, writtenKey, mod, sig, pcName, keyName, vexKey, vexNote, noteName, staffStep, scale, chordName, number, parseChord,
+  // Staff position (as staffStep counts it) -> MIDI note, with the key signature's sharps/flats.
+  function stepToMidi(step, key) {
+    const oct = Math.floor(step / 7), letter = mod(step, 7);
+    let m = (oct + 1) * 12 + MAJOR_SCALE[letter];
+    const sg = sig(key), L = LETTERS[letter];
+    if (sg > 0 && 'FCGDAEB'.slice(0, sg).includes(L)) m += 1;
+    if (sg < 0 && 'BEADGCF'.slice(0, -sg).includes(L)) m -= 1;
+    return m;
+  }
+  // The note called `letter` (A-G) in the key, in the octave closest to `near`.
+  function letterToMidi(letter, key, near) {
+    const base = stepToMidi(4 * 7 + LETTERS.indexOf(letter.toUpperCase()), key);
+    let best = base, bd = 1e9;
+    for (let o = -4; o <= 4; o++) { const m = base + 12 * o, d = Math.abs(m - near); if (d < bd) { bd = d; best = m; } }
+    return best;
+  }
+  return { stepToMidi, letterToMidi, QUAL, isMinor, comfort, fingering, meter, INSTRUMENTS, CLEF, inst, writtenKey, mod, sig, pcName, keyName, vexKey, vexNote, noteName, staffStep, scale, chordName, number, parseChord,
     violinComfort, accidentalText, mainProgression, chordSummary, chordTones, SHARPS, FLATS };
 })();
